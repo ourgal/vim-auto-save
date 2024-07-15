@@ -1,146 +1,145 @@
-"======================================
-"    Script Name:  vim-auto-save (http://www.vim.org/scripts/script.php?script_id=4521)
-"    Plugin Name:  AutoSave
-"        Version:  0.1.13
-"======================================
+if !has('vim9script') ||  v:version < 900
+    finish
+endif
+vim9script
+#======================================
+#    Script Name:  vim-auto-save (http://www.vim.org/scripts/script.php?script_id=4521)
+#    Plugin Name:  AutoSave
+#        Version:  0.1.13
+#======================================
 
 if exists("g:auto_save_loaded")
   finish
 else
-  let g:auto_save_loaded = 1
+  g:auto_save_loaded = true
 endif
 
-let s:save_cpo = &cpo
+const save_cpo = &cpo
 set cpo&vim
 
 if !exists("g:auto_save")
-  let g:auto_save = 0
+  g:auto_save = false
 endif
 
 if !exists("g:auto_save_silent")
-  let g:auto_save_silent = 0
+  g:auto_save_silent = false
 endif
 
 if !exists("g:auto_save_write_all_buffers")
-  let g:auto_save_write_all_buffers = 0
+  g:auto_save_write_all_buffers = false
 endif
 
 if !exists("g:auto_save_events")
-  let g:auto_save_events = ["InsertLeave", "TextChanged"]
+  g:auto_save_events = ["InsertLeave", "TextChanged"]
 endif
 
-" Check all used events exist
-for event in g:auto_save_events
-  if !exists("##" . event)
-    let eventIndex = index(g:auto_save_events, event)
-    if (eventIndex >= 0)
-      call remove(g:auto_save_events, eventIndex)
-      echo "(AutoSave) Save on " . event . " event is not supported for your Vim version!"
-      echo "(AutoSave) " . event . " was removed from g:auto_save_events variable."
-      echo "(AutoSave) Please, upgrade your Vim to a newer version or use other events in g:auto_save_events!"
-    endif
+def FilterEvents(_: number, event: string): bool
+  if !exists("##" .. event)
+    echo "(AutoSave) Save on " .. event .. " event is not supported for your Vim version!"
+    echo "(AutoSave) " .. event .. " was removed from g:auto_save_events variable."
+    echo "(AutoSave) Please, upgrade your Vim to a newer version or use other events in g:auto_save_events!"
+
+    return false
   endif
-endfor
+
+  return true
+enddef
+
+# Check all used events exist
+g:auto_save_events->filter(FilterEvents)
 
 augroup auto_save
   autocmd!
-  for event in g:auto_save_events
-    execute "au " . event . " * nested call AutoSave()"
-  endfor
+  execute "au" g:auto_save_events->join(',') "* ++nested AutoSave()"
 augroup END
 
-command AutoSaveToggle :call AutoSaveToggle()
+command AutoSaveToggle AutoSaveToggle()
 
-function AutoSave()
-  if s:GetVar('auto_save', 0) == 0
+def AutoSave()
+  if !GetVar('auto_save')
     return
-  end
+  endif
 
-  let was_modified = s:IsModified()
+  const was_modified = IsModified()
   if !was_modified
     return
-  end
+  endif
 
   if exists("g:auto_save_presave_hook")
-    let g:auto_save_abort = 0
-    execute "" . g:auto_save_presave_hook
+    g:auto_save_abort = 0
+    execute g:auto_save_presave_hook
     if g:auto_save_abort >= 1
       return
     endif
   endif
 
-  " Preserve marks that are used to remember start and
-  " end position of the last changed or yanked text (`:h '[`).
-  let first_char_pos = getpos("'[")
-  let last_char_pos = getpos("']")
+  # Preserve marks that are used to remember start and
+  # end position of the last changed or yanked text (`:h '[`).
+  const first_char_pos = getpos("'[")
+  const last_char_pos = getpos("']")
 
-  " Preserve the window view.
-  let window_view = winsaveview()
+  # Preserve the window view.
+  const window_view = winsaveview()
 
-  call DoSave()
+  DoSave()
 
-  call winrestview(window_view)
+  winrestview(window_view)
 
-  call setpos("'[", first_char_pos)
-  call setpos("']", last_char_pos)
+  setpos("'[", first_char_pos)
+  setpos("']", last_char_pos)
 
   if was_modified && !&modified
     if exists("g:auto_save_postsave_hook")
-      execute "" . g:auto_save_postsave_hook
+      execute g:auto_save_postsave_hook
     endif
 
-    if g:auto_save_silent == 0
-      echo "(AutoSave) saved at " . strftime("%H:%M:%S")
+    if !g:auto_save_silent
+      echo "(AutoSave) saved at " .. strftime("%H:%M:%S")
     endif
   endif
-endfunction
+enddef
 
-function s:IsModified()
-  if g:auto_save_write_all_buffers >= 1
-    let buffers = filter(range(1, bufnr('$')), 'bufexists(v:val)')
-    call filter(buffers, 'getbufvar(v:val, "&modified")')
+def IsModified(): bool
+  if g:auto_save_write_all_buffers
+    const buffers = 1->range(bufnr('$'))->filter((_, v) => bufexists(v))->filter((_, v) => v->getbufvar('&modified'))
     return len(buffers) > 0
   else
     return &modified
   endif
-endfunction
+enddef
 
-" Resolve variable value by climbing up window-buffer-global hierarchy
-" So, buffer-local or window-local variables override global ones
-" If not found on any level, fallbacks to default value or empty string
-function s:GetVar(...)
-  let varName = a:1
-
-  if exists('w:' . varName)
-    return w:{varName}
-  elseif exists('b:' . varName)
-    return b:{varName}
-  elseif exists('g:' . varName)
-    return g:{varName}
+# Resolve variable value by climbing up window-buffer-global hierarchy
+# So, buffer-local or window-local variables override global ones
+# If not found on any level, fallbacks to default value or empty string
+def GetVar(varName: string, default: bool = false): bool
+  if exists('w:' .. varName)
+    return get(w:, varName)
+  elseif exists('b:' .. varName)
+    return get(b:, varName)
+  elseif exists('g:' .. varName)
+    return get(g:, varName)
   else
-    return exists('a:2') ? a:2 : ''
+    return default
   endif
-endfunction
+enddef
 
-function DoSave()
-  if g:auto_save_write_all_buffers >= 1
-    let current_buf = bufnr('%')
+def DoSave(): void
+  if g:auto_save_write_all_buffers
+    const current_buf = bufnr('%')
     silent! bufdo update
-    execute 'buffer' . current_buf
+    execute 'buffer' current_buf
   else
     silent! update
   endif
-endfunction
+enddef
 
-function AutoSaveToggle()
-  if g:auto_save >= 1
-    let g:auto_save = 0
+def AutoSaveToggle()
+  if g:auto_save
     echo "(AutoSave) OFF"
   else
-    let g:auto_save = 1
     echo "(AutoSave) ON"
   endif
-endfunction
+  g:auto_save = !g:auto_save
+enddef
 
-let &cpo = s:save_cpo
-unlet s:save_cpo
+&cpo = save_cpo
